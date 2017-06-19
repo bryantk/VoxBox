@@ -1,0 +1,134 @@
+using UnityEngine;
+using System.Collections;
+using UnityEngine.UI;
+using System.Text.RegularExpressions;
+
+public class MessageDisplay : MonoBehaviour {
+
+
+    VoxBox m;
+
+    public Text nameText;
+
+    public Text textUI;
+    //public bool _click = false;
+
+    public Animator anim;
+
+    public Image button;
+
+    public int characters = 0;
+
+    // Use this for initialization
+    void Start () {
+        print("pre");
+        VoxBox.onEnter += onStart;
+        VoxBox.onTextUpdate += onNext;
+        VoxBox.onExit += onEnd;
+        VoxBox.onBuildWindow += buildWindow;
+        VoxBox.onWindowTeardown += tearDown;
+        VoxBox.onAwaitInput += onAwait;
+        VoxBox.onCharAdvance += onCharAdvance;
+        VoxBox.onProcessTag += onTag;
+
+        button.enabled = false;
+
+        m = GetComponent<VoxBox>();
+        
+        
+
+        m.iSetup(100);
+
+
+        m.QueueMessage("One two three four nine then some more and more.\nOne two three four nine then some more and more.\nOne two three four nine then some more and more.\nOne two three four nine then some more and more.\n");
+        m.QueueMessage("And I am 2nd!\nWith my second line as well.\nWith a second line.\nWith a second line.");
+        m.BeginMessages(callback:()=> { More(); });
+
+    }
+
+    void More() {
+        print("running 3d");
+        m.QueueMessage("3rd line.");
+        m.BeginMessages();
+    }
+
+
+    void onTag(string tag) {
+        string nameRegex = @"namer='(.*)'";
+        Match m = Regex.Match(tag, nameRegex);
+        if (m.Success)
+        {
+            nameText.text = m.Groups[1].Value;
+        }
+        else if (tag == "close")
+            VoxBox._this.instaClose = true;
+    }
+
+
+    void onCharAdvance(char c) {
+        characters++;
+    }
+
+
+    IEnumerator buildWindow(VoxBoxData data) {
+        string name = data.name;
+        if (name != null)
+        {
+            nameText.gameObject.SetActive(true);
+            nameText.text = name;
+        }
+        else
+            nameText.gameObject.SetActive(false);
+
+        textUI.text = "";
+        anim.Play("in");
+        yield return new WaitForSeconds(1);
+    }
+
+
+    IEnumerator tearDown(bool closeInstantly=false) {
+        button.enabled = false;
+        if (closeInstantly)
+        {
+            textUI.text = "CLOSEd";
+            yield break;
+        }
+            
+        anim.Play("out");
+        yield return new WaitForSeconds(1);
+    }
+
+
+    void onStart() {
+        print("begining");
+    }
+
+
+    void onNext(VoxBoxData d) {
+        button.enabled = false;
+        textUI.text = d.text;
+    }
+
+
+    void onAwait() {
+        button.enabled = true;
+    }
+
+
+    void onEnd() {
+        print("end");
+    }
+
+
+    void Update() {
+        if (Input.GetKey(KeyCode.Space))
+            VoxBox._this.KeyDown();
+        if (Input.GetKeyUp(KeyCode.Space))
+            VoxBox._this.KeyUp();
+    }
+
+    public void OnGUI() {
+        GUI.Label(new Rect(10, 10, 100, 20), Time.time.ToString());
+    }
+
+}
