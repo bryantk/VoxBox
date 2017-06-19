@@ -1,0 +1,283 @@
+using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+
+
+
+public class VoxBox : MonoBehaviour {
+
+    // TODO
+    // Documentation
+    // cleanup
+    // Message position
+    // Choices
+    // tie in to wait time
+
+    public int speeds;
+    private int flipFlop = 0;
+
+
+    static private Queue<VoxBoxData> messageQueue;
+
+    static public VoxBoxData currentMessage;
+
+    public Dictionary<char, float> charSpeeds;
+
+    // -- Typical Flow --
+    // onEnter
+    // onBuildWindow(rect position)
+    // onTextUpdate  <---\
+    // onCharAdvance    |
+    // onProcessTag     |
+    // onAwaitInput ----/
+    // onWindowTeardown(bool immediate?)
+    // onExit
+
+
+    // Occurs when Dialoguer starts a dialogue.
+    public static event StartedHandler onEnter;
+    public delegate void StartedHandler();
+
+    // Occurs when Dialoguer enters a TextPhase in a dialogue.
+    public static event BuildWindowHandler onBuildWindow;
+    public delegate IEnumerator BuildWindowHandler(VoxBoxData data);
+
+    // Occurs when Dialoguer updates text to display. Calle should use data.text to update display.
+    public static event TextUpdateHandler onTextUpdate;
+    public delegate void TextUpdateHandler(VoxBoxData data);
+
+    // Occurs a single character of the message has been printed. Does not occue when delay speed == 0. Used for text sounds.
+    public static event CharAdvanced onCharAdvance;
+    public delegate void CharAdvanced(char character);
+
+    // Occurs when Dialoguer encounters a tag while printing text to screen
+    public static event ProcessTagHandler onProcessTag;
+    public delegate void ProcessTagHandler(string tag);
+
+    // Occurs when all of message has been displayed, but player has not pressed advance button.
+    public static event AwaitInput onAwaitInput;
+    public delegate void AwaitInput();
+
+    // Occurs when Dialoguer calls for the text window to close. closeInstantly 
+    public static event WindowTeardownHandler onWindowTeardown;
+    public delegate IEnumerator WindowTeardownHandler(bool closeInstantly=false);
+
+    // Occurs when Dialoguer ends a dialogue.
+    public static event EndedHandler onExit;
+    public delegate void EndedHandler();
+    
+    // Called at completeion of entire dialoug.
+    public Callback onComplete;
+
+
+
+    // Close the dialouge instantly and without normal teardown. Set via custom tag.
+    public bool instaClose = false;
+    // Set to true to not call teardown/exit. Used to chain multiple different messages into one continuous dialouge.
+    private bool continuousMessage = false;
+
+    // Time to wait after displaying a character. 0 for instant.
+    private float charDelay = 0.3f;
+    // Time to wait after displaying a character when advancement button is held down.
+    public float speedUpRate = 2;
+    // Display rich text tags all at once?
+    public bool useRichTextTags = true;
+    
+    // True when entire message has been displayed
+    private bool messageComplete;
+    // When true, increase speed of character display. 
+    private bool advancementKeyDown = false;
+    // Used to distinguish between holding down key to speed up text, and pressing key to advance message.
+    private bool advancementKeyUp = true;
+
+    //Singleton
+    static public VoxBox _this;
+
+
+
+    public void iSetup(int wordsPerMin=1000, Dictionary<char, float> charSpeedMap=null) {
+        _this = this;
+        messageQueue = new Queue<VoxBoxData>();
+        SetWordsPerMinute(wordsPerMin);
+        charSpeeds = new Dictionary<char, float>();
+        foreach (KeyValuePair<char, float> kv in charSpeedMap ?? new Dictionary<char, float>())
+        {
+            charSpeeds.Add(kv.Key, kv.Value);
+        }
+        
+    }
+
+    static public void SetWordsPerMinute(int WordsPerMinute) {
+        _this.charDelay = 1f / (WordsPerMinute * 5f / 60f);
+        print(_this.charDelay);
+    }
+
+    static public void TextPhase(VoxBoxData data) {
+        if (onTextUpdate != null)
+            onTextUpdate(data);
+    }
+
+    public void QueueMessage(string text, string name = null, string meta = null, Texture2D portrait = null, bool instaClose=false) {
+        text = ParseText(text, ref name, ref meta);
+        //TODO - figure out if more message than lines -> scroll test or break into other mesages
+        messageQueue.Enqueue(new VoxBoxData(text, name, meta, portrait, useRichText: useRichTextTags, instaClose: instaClose));
+    }
+
+    // convert symbols into literals and/or code cues
+    private string ParseText(string text, ref string name, ref string meta) {
+        string nameRegex = @"<name='(.*)'>";
+        Match m = Regex.Match(text, nameRegex);
+        if (m.Success)
+        {
+            name = m.Groups[1].Value;
+            text = Regex.Replace(text, nameRegex, "");
+        }
+        
+        return text;
+    }
+
+    private VoxBoxData NextMessage() {
+        currentMessage = messageQueue.Dequeue();
+        instaClose = currentMessage.instaClose;
+        return currentMessage;
+    }
+
+    public void BeginMessages(Callback callback = null) {
+        if (messageQueue.Count == 0)
+            return;
+        instaClose = false;
+        onComplete = callback;
+        if (onEnter != null && !continuousMessage)
+            onEnter();
+        messageComplete = false;
+        StartCoroutine(RunMessages());
+    }
+
+    IEnumerator RunMessages() {
+        currentMessage = NextMessage();
+        if (onBuildWindow != null && !continuousMessage)
+            yield return onBuildWindow(currentMessage);
+        yield return (AdvanceMessage(currentMessage));
+    }
+
+    public void ContinueMessages() {
+        messageComplete = false;
+        if (messageQueue.Count > 0)
+        {
+            currentMessage = NextMessage();
+            StartCoroutine(AdvanceMessage(currentMessage));
+        }
+        else
+            EndMessages();
+    }
+
+    public void EndMessages() {
+        currentMessage = null;
+        StartCoroutine(EndingMessages());
+    }
+
+    IEnumerator EndingMessages() {
+        if (!continuousMessage)
+        {
+            if (onWindowTeardown != null)
+                yield return onWindowTeardown(instaClose);
+            if (onExit != null)
+                onExit();
+        }
+        //Callback
+        if (onComplete != null)
+            onComplete();
+    }
+
+    // Called from VoxBoxData when a character is written to screen. Use for sound and stuff.
+    static public void AdvancedChar(char c) {
+        if (onCharAdvance != null && _this.charDelay > 0)
+            onCharAdvance(c);
+    }
+
+
+    // Provide code for custom tag handling here. Return false to hide the tag from display, true to show.
+    static public void ProcessTag(string tag) {
+        //strip leading < and trailing >
+        tag = tag.Substring(1, tag.Length - 2);
+        if (onProcessTag != null)
+            onProcessTag(tag);
+    }
+
+    IEnumerator AdvanceMessage(VoxBoxData currentMessage) {
+        // TODO
+        flipFlop = 0;
+        char result = default(char);
+        do
+        {
+            int interations = speeds - 20;
+            result = currentMessage.AdvanceText();
+            advancementKeyDown = false;
+            if (interations <= -20)
+                continue;
+
+            if (charSpeeds.ContainsKey(result))
+                interations = Mathf.RoundToInt(interations / charSpeeds[result]);
+
+
+            if (advancementKeyDown)
+            {
+                interations = Mathf.Max(-19, interations - 2);
+            }
+
+            if (interations <= 0)
+            {
+                interations = -interations + 1;
+                if (flipFlop >= interations)
+                {
+                    flipFlop = 0;
+                    yield return null;
+                    continue;
+                }
+                flipFlop++;
+                continue;
+            }
+            
+
+            for (int i = interations; i > 0; i--)
+            {
+                if (advancementKeyDown)
+                {
+                    i--;
+                    if (i <= 0)
+                        break;
+                }
+                yield return null;
+            }
+        } while (result != default(char));
+        messageComplete = true;
+        if (onAwaitInput != null)
+            onAwaitInput();
+        print(Time.time);
+    }
+
+    /// <summary>
+    /// Tie to 'Advancement Key Down' hooks
+    /// On hold, speed up text display. On click at end of message, advance.
+    /// </summary>
+    public void KeyDown() {
+        if (messageComplete && advancementKeyUp)
+        {
+            ContinueMessages();
+            advancementKeyUp = false;
+            return;
+        }
+        advancementKeyDown = true;
+        advancementKeyUp = false;
+    }
+
+    /// <summary>
+    /// Tie to 'Advancement Key Up' hooks
+    /// Signifies the advancement key has been released, as to not power through text display AND message advancement if held.
+    /// </summary>
+    public void KeyUp() {
+        advancementKeyUp = true;
+    }
+
+}
