@@ -1,0 +1,86 @@
+using UnityEngine;
+using System.Collections;
+
+public class VoxBoxData {
+
+    // Text to display
+    public string text;
+    // Raw, unformatted text
+    private string rawText;
+    // index of text to display 'type writter' style
+    private int index;
+    // Parse <richText> tags all at once, rather than character by character
+    private bool richText;
+    // Dirty Close of window
+    public bool instaClose;
+    // Flag when complete message has been shown
+    public bool complete;
+    // Name of this message's 'speaker'
+    public string name;
+
+    // TODO
+    public string meta;
+    // TODO
+    public Texture2D portrait;
+
+    public VoxBoxData(string rawText, string name=null, string meta=null, Texture2D portrait=null, bool useRichText=true, bool instaClose=false) {
+        this.rawText = rawText;
+        index = 0;
+        complete = false;
+        richText = useRichText;
+        this.instaClose = instaClose;
+        this.name = name;
+
+        this.meta = meta;
+        this.portrait = portrait;
+    }
+
+    /// <summary>
+    /// Advances text one character (or tag) at a time
+    /// </summary>
+    /// <returns></returns>
+    public char AdvanceText() {
+        if (index >= rawText.Length)
+        {
+            complete = true;
+            return default(char);
+        }
+        char c = rawText[index];
+        if (richText)
+        {
+            // excaped characters
+            char next = index + 1 < rawText.Length ? rawText[index + 1] : default(char);
+            if (c == '\\' && next != default(char))
+            {
+                c = next;
+                text += c;
+                index++;
+            }
+            // Tags
+            else if (c == '<')
+            {
+                string tag = c.ToString();
+                while (c != '>')
+                {
+                    index++;
+                    c = rawText[index];
+                    tag += c;
+                }
+                VoxBox.ProcessTag(tag);
+                index++;
+                return AdvanceText();
+                c = default(char);
+            }
+            // Normal text
+            else
+                text += c;
+        }
+        else
+            text += c;
+        VoxBox.TextPhase(this);
+        VoxBox.AdvancedChar(c);
+        index++;
+        return c;
+    }
+
+}
